@@ -1,0 +1,4 @@
+2026-10-25 13:51:14 INFO  pe.utp.lookhoy.util.DatabaseConfig - Esquema de base de datos listo
+2026-10-25 13:51:15 INFO  pe.utp.lookhoy.App - Iniciando LookHoy
+2026-10-25 13:51:46 INFO  pe.utp.lookhoy.service.AuthService - Usuario registrado id=1
+2026-10-25 13:52:18 INFO  pe.utp.lookhoy.service.ClosetService - Prenda agregada id=1 usuario=1
