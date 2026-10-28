@@ -1,6 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState } from "react"
 import { Brand, Button, Field, Heading, Icon, Page } from "@/components/ui"
 import { heroPhoto, seedGarments, seedOccasions } from "@/data/seed"
+import { analyzeLook, type LookAnalysis } from "@/lib/ai"
+import { reviewLook, type LookReview } from "@/lib/check"
+import { downloadExcel } from "@/lib/excel"
 import { fileToDataUrl } from "@/lib/image"
 import { suggestOutfit } from "@/lib/outfit"
 import { uid, useStoredState } from "@/lib/storage"
@@ -155,11 +158,13 @@ function Closet({
   setGarments,
   go,
   storageError,
+  onExport,
 }: {
   garments: Garment[]
   setGarments: (f: (g: Garment[]) => Garment[]) => void
   go: (v: View) => void
   storageError: string | null
+  onExport: () => void
 }) {
   const [filter, setFilter] = useState("Todo")
   const visible = filter === "Todo" ? garments : garments.filter((g) => g.category === filter)
@@ -183,9 +188,14 @@ function Closet({
               : "Aún no tienes prendas. Agrega la primera."
           }
         />
-        <Button onClick={() => go("upload")}>
-          <Icon name="plus" /> Agregar prenda
-        </Button>
+        <div className="title-actions">
+          <Button secondary onClick={onExport} disabled={garments.length === 0}>
+            <Icon name="download" /> Exportar a Excel
+          </Button>
+          <Button onClick={() => go("upload")}>
+            <Icon name="plus" /> Agregar prenda
+          </Button>
+        </div>
       </div>
       {storageError && <p className="error-note">{storageError}</p>}
       <div className="filters">
@@ -700,15 +710,265 @@ function Outfit({
   )
 }
 
+/* ---------- outfit del día ---------- */
+const VERDICT_LABEL = { ok: "VA PERFECTO", casi: "CASI LISTO", cambia: "AJÚSTALO" } as const
+
+function Today({
+  garments,
+  occasions,
+  occasion,
+  setOccasion,
+  weather,
+  go,
+}: {
+  garments: Garment[]
+  occasions: Occasion[]
+  occasion: string
+  setOccasion: (s: string) => void
+  weather: WeatherInfo | null
+  go: (v: View) => void
+}) {
+  const [image, setImage] = useState<string | null>(null)
+  const [style, setStyle] = useState<Style>("Casual")
+  const [warmth, setWarmth] = useState<Warmth>(2)
+  const [hasCoat, setHasCoat] = useState(false)
+  const [review, setReview] = useState<LookReview | null>(null)
+  const [analysis, setAnalysis] = useState<LookAnalysis | null>(null)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleFile(file?: File | null) {
+    if (!file) return
+    if (!/^image\/(jpeg|png)$/.test(file.type)) return setError("Usa una imagen JPG o PNG.")
+    if (file.size > 10 * 1024 * 1024) return setError("La imagen supera los 10 MB.")
+    try {
+      setImage(await fileToDataUrl(file))
+      setError(null)
+      setReview(null)
+      setAnalysis(null)
+    } catch {
+      setError("No se pudo leer la imagen. Prueba con otra.")
+    }
+  }
+
+  function submit(e: FormEvent) {
+    e.preventDefault()
+    if (!image) return setError("Primero sube la foto de tu outfit.")
+    setError(null)
+    setReview(reviewLook({ style, warmth, hasCoat }, occasion, weather))
+  }
+
+  /** La IA mira la foto, rellena el formulario y revisa el look; la persona puede corregir y volver a revisar. */
+  async function analyze() {
+    if (!image) return setError("Primero sube la foto de tu outfit.")
+    setError(null)
+    setAnalyzing(true)
+    try {
+      const a = await analyzeLook(image, occasion, weather)
+      if (!a.isOutfit) {
+        setAnalysis(null)
+        setReview(null)
+        return setError("No vemos un outfit en la foto. Prueba con una foto donde se vea tu ropa.")
+      }
+      setAnalysis(a)
+      setStyle(a.style)
+      setWarmth(a.warmth)
+      setHasCoat(a.hasCoat)
+      setReview(reviewLook({ style: a.style, warmth: a.warmth, hasCoat: a.hasCoat }, occasion, weather))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo analizar la foto.")
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
+  // Si no es perfecto, mostramos qué armaría LookHoy con el clóset de la persona.
+  const alternative = useMemo(
+    () =>
+      review && review.verdict !== "ok" && garments.length
+        ? suggestOutfit(garments, occasion, weather, 0)
+        : null,
+    [review, garments, occasion, weather],
+  )
+
+  const weatherText = weather
+    ? `${weather.city} · ${weather.tempC} °C (sensación ${weather.feelsC} °C) · ${weather.description}`
+    : "Sin datos del clima (se evalúa como día templado)"
+
+  return (
+    <>
+      <Heading
+        eyebrow="REVISA TU LOOK"
+        title="Outfit del día"
+        text="Sube la foto de lo que te pusiste y te decimos si va con el clima y con tu ocasión."
+      />
+      <div className="upload-layout">
+        <label
+          className={`dropzone ${image ? "has-image" : ""}`}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault()
+            void handleFile(e.dataTransfer.files?.[0])
+          }}
+        >
+          <input
+            type="file"
+            accept="image/png,image/jpeg"
+            onChange={(e) => {
+              void handleFile(e.target.files?.[0])
+              e.target.value = ""
+            }}
+          />
+          {image ? (
+            <>
+              <img className="dropzone-preview" src={image} alt="Foto de tu outfit del día" />
+              <span className="file-button">Cambiar fotografía</span>
+            </>
+          ) : (
+            <>
+              <span className="upload-icon">
+                <Icon name="upload" size={30} />
+              </span>
+              <h3>Sube la foto de tu outfit</h3>
+              <p>arrastra la imagen o selecciónala desde tu equipo</p>
+              <span className="file-button">Seleccionar fotografía</span>
+              <small>JPG o PNG · Máximo 10 MB</small>
+            </>
+          )}
+        </label>
+        <form className="details-card" onSubmit={submit}>
+          <div>
+            <span className="step">01</span>
+            <h2>¿Cómo es tu look?</h2>
+            <p>Cuéntanos cómo se ve para revisarlo contra el clima y la ocasión.</p>
+          </div>
+          <label className="field">
+            <span>Situación</span>
+            <select value={occasion} onChange={(e) => setOccasion(e.target.value)}>
+              {occasions.map((o) => (
+                <option key={o.name}>{o.name}</option>
+              ))}
+            </select>
+          </label>
+          <div className="field-pair">
+            <label className="field">
+              <span>Estilo del look</span>
+              <select value={style} onChange={(e) => setStyle(e.target.value as Style)}>
+                {STYLES.map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Nivel de abrigo</span>
+              <select value={warmth} onChange={(e) => setWarmth(Number(e.target.value) as Warmth)}>
+                {([1, 2, 3] as Warmth[]).map((w) => (
+                  <option key={w} value={w}>
+                    {WARMTH_LABEL[w]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="checkbox">
+            <input type="checkbox" checked={hasCoat} onChange={(e) => setHasCoat(e.target.checked)} />
+            <span>
+              <Icon name="check" size={14} />
+            </span>
+            <small>Llevo casaca o abrigo encima.</small>
+          </label>
+          <p className="weather-line">
+            <Icon name="cloud" size={16} /> {weatherText}
+          </p>
+          {error && <p className="error-note">{error}</p>}
+          <div className="form-actions">
+            <Button onClick={() => void analyze()} disabled={analyzing || !image}>
+              {analyzing ? "Analizando foto…" : "Analizar con IA"}
+            </Button>
+            <Button type="submit" secondary disabled={analyzing}>
+              Revisar con mis datos
+            </Button>
+          </div>
+          <small className="ai-privacy">
+            «Analizar con IA» envía la foto a un servicio de inteligencia artificial para detectar tus prendas.
+            También puedes marcar los datos a mano.
+          </small>
+        </form>
+      </div>
+
+      {review && (
+        <section className={`review-card review-${review.verdict}`} aria-live="polite">
+          <div className="review-head">
+            <div className="review-score">
+              <strong>{review.score}</strong>
+              <span>/100</span>
+            </div>
+            <div>
+              <span className="eyebrow">{VERDICT_LABEL[review.verdict]}</span>
+              <h2>{review.headline}</h2>
+              <p>
+                {occasion} · {weatherText}
+              </p>
+            </div>
+          </div>
+          {analysis && (
+            <div className="ai-box">
+              <span className="eyebrow">LO QUE VE LA IA</span>
+              {analysis.pieces.length > 0 && (
+                <div className="chips">
+                  {analysis.pieces.map((p) => (
+                    <span key={p}>{p}</span>
+                  ))}
+                </div>
+              )}
+              {analysis.comment && <p>{analysis.comment}</p>}
+              <small>Detectó: estilo {analysis.style.toLowerCase()}, abrigo {WARMTH_LABEL[analysis.warmth].toLowerCase()}. Si no acertó, corrige los datos y revisa de nuevo.</small>
+            </div>
+          )}
+          <ul className="review-checks">
+            {review.checks.map((c) => (
+              <li key={c.label} className={`check-${c.level}`}>
+                <b>{c.label}</b>
+                <span>{c.text}</span>
+              </li>
+            ))}
+          </ul>
+          {review.tips.length > 0 && (
+            <div className="review-tips">
+              <h3>Para mejorarlo</h3>
+              <ul>
+                {review.tips.map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {alternative && alternative.pieces.length > 0 && (
+            <div className="review-alt">
+              <h3>Con tu clóset, LookHoy armaría</h3>
+              <p>{alternative.pieces.map((p) => p.name).join(" · ")}</p>
+              <Button secondary onClick={() => go("outfit")}>
+                Ver outfit sugerido <Icon name="chevron" size={16} />
+              </Button>
+            </div>
+          )}
+        </section>
+      )}
+    </>
+  )
+}
+
 /* ---------- historial ---------- */
 function History({
   saved,
   setSaved,
   open,
+  onExport,
 }: {
   saved: SavedOutfit[]
   setSaved: (f: (s: SavedOutfit[]) => SavedOutfit[]) => void
   open: (o: SavedOutfit) => void
+  onExport: () => void
 }) {
   const [tab, setTab] = useState("Historial")
   const favorites = saved.filter((s) => s.favorite)
@@ -719,11 +979,16 @@ function History({
 
   return (
     <>
-      <Heading
-        eyebrow="TUS COMBINACIONES"
-        title="Historial y favoritos"
-        text="Vuelve a tus looks anteriores o guarda inspiración para después."
-      />
+      <div className="title-row">
+        <Heading
+          eyebrow="TUS COMBINACIONES"
+          title="Historial y favoritos"
+          text="Vuelve a tus looks anteriores o guarda inspiración para después."
+        />
+        <Button secondary onClick={onExport}>
+          <Icon name="download" /> Exportar a Excel
+        </Button>
+      </div>
       <div className="tabs">
         {["Historial", "Favoritos"].map((item) => (
           <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>
@@ -803,6 +1068,8 @@ export default function App() {
 
   if (!user) return <Login onLogin={setUser} weather={weatherState.weather} />
 
+  const exportExcel = () => downloadExcel(garments, saved)
+
   const buildOutfit = () => {
     setVariant(0)
     setPreset(null)
@@ -828,13 +1095,32 @@ export default function App() {
   const content = (() => {
     switch (view) {
       case "closet":
-        return <Closet garments={garments} setGarments={setGarments} go={go} storageError={garmentsError} />
+        return (
+          <Closet
+            garments={garments}
+            setGarments={setGarments}
+            go={go}
+            storageError={garmentsError}
+            onExport={exportExcel}
+          />
+        )
       case "upload":
         return (
           <Upload
             addGarment={(g) => setGarments((all) => [g, ...all])}
             go={go}
             storageError={garmentsError}
+          />
+        )
+      case "today":
+        return (
+          <Today
+            garments={garments}
+            occasions={occasions}
+            occasion={occasion}
+            setOccasion={setOccasion}
+            weather={weatherState.weather}
+            go={go}
           />
         )
       case "outfit":
@@ -860,6 +1146,7 @@ export default function App() {
               setView("outfit")
               window.scrollTo({ top: 0 })
             }}
+            onExport={exportExcel}
           />
         )
       default:

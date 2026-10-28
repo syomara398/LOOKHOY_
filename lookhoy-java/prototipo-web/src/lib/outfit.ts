@@ -13,7 +13,7 @@ export function stylesFor(occasion: string): Style[] {
 }
 
 /** Abrigo deseado (1-3) a partir de la sensación térmica. */
-function targetWarmth(feelsC: number): 1 | 2 | 3 {
+export function targetWarmth(feelsC: number): 1 | 2 | 3 {
   if (feelsC >= 23) return 1
   if (feelsC >= 17) return 2
   return 3

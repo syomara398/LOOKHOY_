@@ -12,7 +12,7 @@ export const WARMTH_LABEL: Record<Warmth, string> = {
   3: "Abrigado",
 }
 
-export type View = "login" | "closet" | "upload" | "home" | "outfit" | "history"
+export type View = "login" | "closet" | "upload" | "home" | "outfit" | "today" | "history"
 
 export interface Garment {
   id: string

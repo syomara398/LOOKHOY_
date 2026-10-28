@@ -26,6 +26,12 @@ export function Icon({ name, size = 20 }: { name: string; size?: number }) {
         <path d="M5 20h14" />
       </>
     ),
+    download: (
+      <>
+        <path d="M12 4v12M7 11l5 5 5-5" />
+        <path d="M5 20h14" />
+      </>
+    ),
     chevron: <path d="m9 18 6-6-6-6" />,
     check: <path d="m5 12 4 4L19 6" />,
     trash: (
@@ -158,6 +164,7 @@ export function Page({
     ["Inicio", "home"],
     ["Mi clóset", "closet"],
     ["Subir prenda", "upload"],
+    ["Outfit del día", "today"],
     ["Historial y favoritos", "history"],
   ]
   return (
