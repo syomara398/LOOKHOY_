@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react"
 import { Brand, Button, Field, Heading, Icon, Page } from "@/components/ui"
-import { heroPhoto, seedGarments, seedOccasions } from "@/data/seed"
+import { heroPhoto, seedOccasions } from "@/data/seed"
 import { analyzeLook, type LookAnalysis } from "@/lib/ai"
 import { reviewLook, type LookReview } from "@/lib/check"
 import { downloadExcel } from "@/lib/excel"
@@ -1044,12 +1044,16 @@ function History({
 /* ---------- app ---------- */
 export default function App() {
   const [user, setUser] = useStoredState<User | null>("user", null)
-  const [garments, setGarments, garmentsError] = useStoredState<Garment[]>("garments", seedGarments)
-  const [saved, setSaved] = useStoredState<SavedOutfit[]>("saved", [])
-  const [occasions, setOccasions] = useStoredState<Occasion[]>("occasions", seedOccasions)
-  const [occasion, setOccasion] = useStoredState<string>("occasion", "Instituto")
-  const [location, setLocation] = useStoredState<string>("location", "Ica")
+  return <Workspace key={user?.email.toLowerCase() ?? "guest"} user={user} setUser={setUser} />
+}
 
+function Workspace({ user, setUser }: { user: User | null; setUser: (u: User | null) => void }) {
+  const p = user ? `u:${user.email.toLowerCase()}:` : "guest:"
+  const [garments, setGarments, garmentsError] = useStoredState<Garment[]>(`${p}garments`, [])
+  const [saved, setSaved] = useStoredState<SavedOutfit[]>(`${p}saved`, [])
+  const [occasions, setOccasions] = useStoredState<Occasion[]>(`${p}occasions`, seedOccasions)
+  const [occasion, setOccasion] = useStoredState<string>(`${p}occasion`, "Instituto")
+  const [location, setLocation] = useStoredState<string>(`${p}location`, "Ica")
   const [view, setView] = useState<View>("home")
   const [variant, setVariant] = useState(0)
   const [preset, setPreset] = useState<SavedOutfit | null>(null)
