@@ -35,7 +35,7 @@ export async function analyzeLook(
       signal,
     })
   } catch {
-    throw new Error("No hay conexión con el servicio de IA. ¿Iniciaste el servidor con «pnpm server»?")
+    throw new Error("No hay conexión con el servicio de IA. ¿Iniciaste el servidor con «npm run server»?")
   }
   const data = await res.json().catch(() => null)
   if (!res.ok) throw new Error(data?.error ?? "El servicio de IA no respondió bien.")

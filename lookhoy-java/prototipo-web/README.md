@@ -23,10 +23,26 @@ pnpm dev       # o npm run dev
 - `src/lib/` clima, outfits, imágenes, almacenamiento · `src/data/seed.ts` prendas de ejemplo
 
 ## Activar la IA (una sola vez)
-1. Crea una clave en https://console.anthropic.com (requiere saldo) y copia `.env.example` como `.env`; pega la clave en `ANTHROPIC_API_KEY=`.
+El servidor `server/index.mjs` funciona con **Gemini** (tiene capa gratuita) o con **Claude** (de pago).
+1. Copia `.env.example` como `.env` y llena una de las dos claves:
+   - Gemini (gratis): crea la clave en https://aistudio.google.com/apikey y pégala en `GEMINI_API_KEY=`.
+   - Claude (de pago): crea la clave en https://console.anthropic.com y pégala en `ANTHROPIC_API_KEY=`.
 2. Abre **dos terminales** en la carpeta `prototipo-web`:
-   - Terminal 1: `pnpm server`  (debe decir «clave configurada»)
-   - Terminal 2: `pnpm dev`
+   - Terminal 1: `npm run server`  (debe decir «clave configurada»)
+   - Terminal 2: `npm run dev`
 3. Entra a *Outfit del día*, sube una foto y pulsa «Analizar con IA».
 
+Aviso de privacidad: en la capa gratuita de Gemini, Google puede usar lo que envías para mejorar sus productos y personas revisoras pueden leerlo. No subas fotos con rostros de otras personas ni datos sensibles.
+
 La clave vive solo en `.env` (ignorado por Git) y en el servidor; nunca va al navegador. No subas `.env` a GitHub.
+
+## Publicar en Render (un solo servicio)
+`server/index.mjs` sirve la web compilada (`dist`) y la IA (`/api`), así que basta **un** Web Service.
+- **Root Directory:** carpeta de `prototipo-web` dentro del repositorio (aquí `lookhoy-java/prototipo-web`)
+- **Build Command:** `npm install --include=dev && npm run build`
+- **Start Command:** `npm start`
+- **Health Check Path:** `/api/health`
+- **Variables de entorno:** `GEMINI_API_KEY` con la clave (nunca en el código ni en GitHub)
+- Node 22 se toma de `engines` en `package.json`.
+- Protecciones del servidor público: 10 análisis por minuto por visitante y un tope de 150 por hora en total (`AI_GLOBAL_PER_HOUR`).
+- El plan gratuito se duerme tras 15 minutos sin visitas: la primera carga después tarda unos segundos.
