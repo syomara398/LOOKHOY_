@@ -124,3 +124,22 @@ export function reviewLook(look: LookInput, occasion: string, weather: WeatherIn
 
   return { score, verdict, headline, checks, tips }
 }
+
+/**
+ * Compara lo que la persona declaró con lo que la IA ve en la foto.
+ * Devuelve un mensaje por cada dato que no coincide (lista vacía si todo coincide).
+ */
+export function compareWithPhoto(declared: LookInput, seen: LookInput): string[] {
+  const out: string[] = []
+  if (declared.style !== seen.style)
+    out.push(`Estilo: indicaste "${declared.style}", pero en la foto se ve un look "${seen.style}".`)
+  if (declared.warmth !== seen.warmth)
+    out.push(`Abrigo: indicaste "${WARMTH_LABEL[declared.warmth]}", pero en la foto se ve "${WARMTH_LABEL[seen.warmth]}".`)
+  if (declared.hasCoat !== seen.hasCoat)
+    out.push(
+      declared.hasCoat
+        ? "Casaca: marcaste que llevas casaca o abrigo, pero no se ve en la foto."
+        : "Casaca: no marcaste casaca o abrigo, pero en la foto se ve uno.",
+    )
+  return out
+}
