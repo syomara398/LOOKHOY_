@@ -2,7 +2,8 @@ import { FormEvent, useEffect, useMemo, useState } from "react"
 import { Brand, Button, Field, Heading, Icon, Page } from "@/components/ui"
 import { heroPhoto, seedOccasions } from "@/data/seed"
 import { analyzeLook, type LookAnalysis } from "@/lib/ai"
-import { reviewLook, type LookReview } from "@/lib/check"
+import { compareWithPhoto, reviewLook, type LookReview } from "@/lib/check"
+import { checkGarment } from "@/lib/garment-check"
 import { downloadExcel } from "@/lib/excel"
 import { fileToDataUrl } from "@/lib/image"
 import { suggestOutfit } from "@/lib/outfit"
@@ -288,6 +289,8 @@ function Upload({
     if (!image) return setError("Primero selecciona una fotografía.")
     if (!category) return setError("Elige una categoría.")
     if (!name.trim()) return setError("Escribe el nombre de la prenda.")
+    const problem = checkGarment({ name, category, style, warmth })
+    if (problem) return setError(problem)
     addGarment({ id: uid(), name: name.trim(), category, style, warmth, image, favorite: false })
     clear()
     setSaved(true)
@@ -736,6 +739,10 @@ function Today({
   const [analysis, setAnalysis] = useState<LookAnalysis | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** true cuando la persona ya marcó algún dato a mano (la IA no debe pisarlo). */
+  const [touched, setTouched] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [conflict, setConflict] = useState<{ seen: LookAnalysis; items: string[] } | null>(null)
 
   async function handleFile(file?: File | null) {
     if (!file) return
@@ -746,6 +753,8 @@ function Today({
       setError(null)
       setReview(null)
       setAnalysis(null)
+      setConflict(null)
+      setNotice(null)
     } catch {
       setError("No se pudo leer la imagen. Prueba con otra.")
     }
@@ -755,13 +764,24 @@ function Today({
     e.preventDefault()
     if (!image) return setError("Primero sube la foto de tu outfit.")
     setError(null)
+    setConflict(null)
+    setNotice(null)
     setReview(reviewLook({ style, warmth, hasCoat }, occasion, weather))
   }
 
-  /** La IA mira la foto, rellena el formulario y revisa el look; la persona puede corregir y volver a revisar. */
+  const describe = (s: Style, w: Warmth, coat: boolean) =>
+    `estilo ${s.toLowerCase()}, abrigo ${WARMTH_LABEL[w].toLowerCase()}, ${coat ? "con" : "sin"} casaca`
+
+  /**
+   * La IA mira la foto y revisa el look. Si la persona ya marcó sus datos y no coinciden con la foto,
+   * NO se cambian en silencio: se muestra un error para que los corrija o elija qué hacer.
+   * Solo si no tocó nada, la IA completa el formulario y se le avisa de que lo hizo.
+   */
   async function analyze() {
     if (!image) return setError("Primero sube la foto de tu outfit.")
     setError(null)
+    setConflict(null)
+    setNotice(null)
     setAnalyzing(true)
     try {
       const a = await analyzeLook(image, occasion, weather)
@@ -770,16 +790,55 @@ function Today({
         setReview(null)
         return setError("No vemos un outfit en la foto. Prueba con una foto donde se vea tu ropa.")
       }
+      const seen = { style: a.style, warmth: a.warmth, hasCoat: a.hasCoat }
+      if (touched) {
+        const items = compareWithPhoto({ style, warmth, hasCoat }, seen)
+        if (items.length) {
+          setAnalysis(null)
+          setReview(null)
+          return setConflict({ seen: a, items })
+        }
+        setAnalysis(a)
+        return setReview(reviewLook({ style, warmth, hasCoat }, occasion, weather))
+      }
       setAnalysis(a)
       setStyle(a.style)
       setWarmth(a.warmth)
       setHasCoat(a.hasCoat)
-      setReview(reviewLook({ style: a.style, warmth: a.warmth, hasCoat: a.hasCoat }, occasion, weather))
+      setNotice(
+        `La IA completó los datos a partir de la foto (${describe(a.style, a.warmth, a.hasCoat)}). Revísalos y corrígelos si no son correctos.`,
+      )
+      setReview(reviewLook(seen, occasion, weather))
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo analizar la foto.")
     } finally {
       setAnalyzing(false)
     }
+  }
+
+  /** La persona decide usar lo que ve la IA (se le avisa del cambio). */
+  function useDetected() {
+    if (!conflict) return
+    const a = conflict.seen
+    setStyle(a.style)
+    setWarmth(a.warmth)
+    setHasCoat(a.hasCoat)
+    setAnalysis(a)
+    setNotice(
+      `Se cambiaron tus datos porque no coincidían con la foto. ${conflict.items.join(" ")} ` +
+        `Ahora el formulario muestra: ${describe(a.style, a.warmth, a.hasCoat)}.`,
+    )
+    setReview(reviewLook({ style: a.style, warmth: a.warmth, hasCoat: a.hasCoat }, occasion, weather))
+    setConflict(null)
+  }
+
+  /** La persona decide mantener sus datos aunque no coincidan con la foto. */
+  function keepMine() {
+    if (!conflict) return
+    setAnalysis(conflict.seen)
+    setNotice("Mantuviste tus datos aunque no coinciden con la foto: el puntaje se calculó con lo que indicaste.")
+    setReview(reviewLook({ style, warmth, hasCoat }, occasion, weather))
+    setConflict(null)
   }
 
   // Si no es perfecto, mostramos qué armaría LookHoy con el clóset de la persona.
@@ -853,7 +912,13 @@ function Today({
           <div className="field-pair">
             <label className="field">
               <span>Estilo del look</span>
-              <select value={style} onChange={(e) => setStyle(e.target.value as Style)}>
+              <select
+                value={style}
+                onChange={(e) => {
+                  setTouched(true)
+                  setStyle(e.target.value as Style)
+                }}
+              >
                 {STYLES.map((s) => (
                   <option key={s}>{s}</option>
                 ))}
@@ -861,7 +926,13 @@ function Today({
             </label>
             <label className="field">
               <span>Nivel de abrigo</span>
-              <select value={warmth} onChange={(e) => setWarmth(Number(e.target.value) as Warmth)}>
+              <select
+                value={warmth}
+                onChange={(e) => {
+                  setTouched(true)
+                  setWarmth(Number(e.target.value) as Warmth)
+                }}
+              >
                 {([1, 2, 3] as Warmth[]).map((w) => (
                   <option key={w} value={w}>
                     {WARMTH_LABEL[w]}
@@ -871,7 +942,14 @@ function Today({
             </label>
           </div>
           <label className="checkbox">
-            <input type="checkbox" checked={hasCoat} onChange={(e) => setHasCoat(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={hasCoat}
+              onChange={(e) => {
+                setTouched(true)
+                setHasCoat(e.target.checked)
+              }}
+            />
             <span>
               <Icon name="check" size={14} />
             </span>
@@ -896,6 +974,36 @@ function Today({
         </form>
       </div>
 
+      {conflict && (
+        <section className="review-card review-cambia" role="alert">
+          <div className="review-head">
+            <div>
+              <span className="eyebrow">LOS DATOS NO COINCIDEN CON LA FOTO</span>
+              <h2>Corrige los datos de tu look</h2>
+              <p>
+                Lo que indicaste no coincide con lo que se ve en la foto. No cambiamos nada por ti: corrige los datos
+                en el formulario o elige una opción.
+              </p>
+            </div>
+          </div>
+          <ul className="review-checks">
+            {conflict.items.map((t) => (
+              <li key={t} className="check-bad">
+                <b>Error</b>
+                <span>{t}</span>
+              </li>
+            ))}
+          </ul>
+          {conflict.seen.comment && <p>{conflict.seen.comment}</p>}
+          <div className="form-actions">
+            <Button onClick={useDetected}>Usar lo que ve la IA</Button>
+            <Button secondary onClick={keepMine}>
+              Mantener mis datos
+            </Button>
+          </div>
+        </section>
+      )}
+
       {review && (
         <section className={`review-card review-${review.verdict}`} aria-live="polite">
           <div className="review-head">
@@ -911,6 +1019,12 @@ function Today({
               </p>
             </div>
           </div>
+          {notice && (
+            <div className="ai-box" role="status">
+              <span className="eyebrow">AVISO</span>
+              <p>{notice}</p>
+            </div>
+          )}
           {analysis && (
             <div className="ai-box">
               <span className="eyebrow">LO QUE VE LA IA</span>
