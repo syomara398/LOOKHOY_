@@ -2,8 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react"
 import { Brand, Button, Field, Heading, Icon, Page } from "@/components/ui"
 import { heroPhoto, seedOccasions } from "@/data/seed"
 import { analyzeLook, type LookAnalysis } from "@/lib/ai"
-import { compareWithPhoto, reviewLook, type LookReview } from "@/lib/check"
-import { checkGarment } from "@/lib/garment-check"
+import { reviewLook, type LookInput, type LookReview } from "@/lib/check"
 import { downloadExcel } from "@/lib/excel"
 import { fileToDataUrl } from "@/lib/image"
 import { suggestOutfit } from "@/lib/outfit"
@@ -23,6 +22,45 @@ import {
   type Warmth,
   type WeatherInfo,
 } from "@/types"
+
+/* ---------- validaciones que avisan en vez de cambiar datos en silencio ---------- */
+const SWIMWEAR = /\b(bikini|biquini|traje de ba[ñn]o|vestido de ba[ñn]o|enterizo de ba[ñn]o)\b/i
+const LIGHT_ITEM = /\b(short|bermuda|sandalias?|chancla|chanclas|crop top|top|tank)\b/i
+const WARM_ITEM = /\b(casaca|abrigo|chompa|chaqueta|campera|parka|bufanda|chalina|gorro|guantes|sueter|suéter)\b/i
+
+/** Revisa que lo marcado tenga sentido con el nombre de la prenda. Solo avisa: no corrige nada. */
+function checkGarment(g: { name: string; style: Style; warmth: Warmth }): string | null {
+  const n = g.name.trim()
+  if (SWIMWEAR.test(n)) {
+    if (g.warmth !== 1)
+      return `"${n}" es ropa de playa o piscina: su nivel de abrigo debe ser "${WARMTH_LABEL[1]}", pero marcaste "${WARMTH_LABEL[g.warmth]}". Corrígelo antes de guardar.`
+    if (g.style === "Formal")
+      return `"${n}" es ropa de playa o piscina y no puede ser de estilo "Formal". Cambia el estilo antes de guardar.`
+    return null
+  }
+  if (LIGHT_ITEM.test(n) && g.warmth === 3)
+    return `"${n}" es una prenda ligera, pero marcaste el nivel de abrigo "${WARMTH_LABEL[3]}". Corrígelo antes de guardar.`
+  if (WARM_ITEM.test(n) && g.warmth === 1)
+    return `"${n}" es una prenda de abrigo, pero marcaste el nivel "${WARMTH_LABEL[1]}". Corrígelo antes de guardar.`
+  return null
+}
+
+/** Compara lo que la persona declaró con lo que la IA ve en la foto (un mensaje por cada dato distinto). */
+function compareWithPhoto(declared: LookInput, seen: LookInput): string[] {
+  const out: string[] = []
+  if (declared.style !== seen.style)
+    out.push(`Estilo: indicaste "${declared.style}", pero en la foto se ve un look "${seen.style}".`)
+  if (declared.warmth !== seen.warmth)
+    out.push(`Abrigo: indicaste "${WARMTH_LABEL[declared.warmth]}", pero en la foto se ve "${WARMTH_LABEL[seen.warmth]}".`)
+  if (declared.hasCoat !== seen.hasCoat)
+    out.push(
+      declared.hasCoat
+        ? "Casaca: marcaste que llevas casaca o abrigo, pero no se ve en la foto."
+        : "Casaca: no marcaste casaca o abrigo, pero en la foto se ve uno.",
+    )
+  return out
+}
+
 
 /* ---------- utilidades de fecha ---------- */
 const longDate = () =>
@@ -289,7 +327,7 @@ function Upload({
     if (!image) return setError("Primero selecciona una fotografía.")
     if (!category) return setError("Elige una categoría.")
     if (!name.trim()) return setError("Escribe el nombre de la prenda.")
-    const problem = checkGarment({ name, category, style, warmth })
+    const problem = checkGarment({ name, style, warmth })
     if (problem) return setError(problem)
     addGarment({ id: uid(), name: name.trim(), category, style, warmth, image, favorite: false })
     clear()
