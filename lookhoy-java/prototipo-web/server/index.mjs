@@ -221,7 +221,8 @@ http
   .createServer((req, res) => {
     const url = (req.url ?? "").split("?")[0]
     if (req.method === "POST" && url === "/api/analyze-look") return void analyzeLook(req, res)
-    if (req.method === "GET" && url === "/api/health") return send(res, 200, { ok: true, ai: Boolean(apiKey()), provider: PROVIDER })
+    // Los monitores de disponibilidad (como UptimeRobot) suelen consultar con HEAD o con GET: se aceptan los dos.
+    if ((req.method === "GET" || req.method === "HEAD") && url === "/api/health") return send(res, 200, { ok: true, ai: Boolean(apiKey()), provider: PROVIDER })
     if (url.startsWith("/api/")) return send(res, 404, { error: "No encontrado." })
     if (req.method === "GET" || req.method === "HEAD") return serveStatic(req, res)
     send(res, 405, { error: "Método no permitido." })
